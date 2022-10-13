@@ -14,6 +14,7 @@ import torch
 from torch import einsum
 from einops import rearrange, repeat
 import modules.textual_inversion.dataset
+from modules.textual_inversion.learn_schedule import LearnRateScheduler
 
 
 class HypernetworkModule(torch.nn.Module):
@@ -42,7 +43,7 @@ class Hypernetwork:
     filename = None
     name = None
 
-    def __init__(self, name=None):
+    def __init__(self, name=None, enable_sizes=None):
         self.filename = None
         self.name = name
         self.layers = {}
@@ -50,7 +51,7 @@ class Hypernetwork:
         self.sd_checkpoint = None
         self.sd_checkpoint_name = None
 
-        for size in [320, 640, 768, 1280]:
+        for size in enable_sizes or []:
             self.layers[size] = (HypernetworkModule(size), HypernetworkModule(size))
 
     def weights(self):
@@ -119,6 +120,17 @@ def load_hypernetwork(filename):
         shared.loaded_hypernetwork = None
 
 
+def find_closest_hypernetwork_name(search: str):
+    if not search:
+        return None
+    search = search.lower()
+    applicable = [name for name in shared.hypernetworks if search in name.lower()]
+    if not applicable:
+        return None
+    applicable = sorted(applicable, key=lambda name: len(name))
+    return applicable[0]
+
+
 def apply_hypernetwork(hypernetwork, context, layer=None):
     hypernetwork_layers = (hypernetwork.layers if hypernetwork is not None else {}).get(context.shape[2], None)
 
@@ -163,7 +175,7 @@ def attention_CrossAttention_forward(self, x, context=None, mask=None):
 
 
 def train_hypernetwork(hypernetwork_name, learn_rate, data_root, log_directory, steps, create_image_every, save_hypernetwork_every, template_file, preview_image_prompt):
-    assert hypernetwork_name, 'embedding not selected'
+    assert hypernetwork_name, 'hypernetwork not selected'
 
     path = shared.hypernetworks.get(hypernetwork_name, None)
     shared.loaded_hypernetwork = Hypernetwork()
@@ -175,6 +187,7 @@ def train_hypernetwork(hypernetwork_name, learn_rate, data_root, log_directory, 
     filename = os.path.join(shared.cmd_opts.hypernetwork_dir, f'{hypernetwork_name}.pt')
 
     log_directory = os.path.join(log_directory, datetime.datetime.now().strftime("%Y-%m-%d"), hypernetwork_name)
+    unload = shared.opts.unload_models_when_training
 
     if save_hypernetwork_every > 0:
         hypernetwork_dir = os.path.join(log_directory, "hypernetworks")
@@ -188,18 +201,18 @@ def train_hypernetwork(hypernetwork_name, learn_rate, data_root, log_directory, 
     else:
         images_dir = None
 
-    cond_model = shared.sd_model.cond_stage_model
-
     shared.state.textinfo = f"Preparing dataset from {html.escape(data_root)}..."
     with torch.autocast("cuda"):
-        ds = modules.textual_inversion.dataset.PersonalizedBase(data_root=data_root, width=512, height=512, repeats=1, placeholder_token=hypernetwork_name, model=shared.sd_model, device=devices.device, template_file=template_file)
+        ds = modules.textual_inversion.dataset.PersonalizedBase(data_root=data_root, width=512, height=512, repeats=1, placeholder_token=hypernetwork_name, model=shared.sd_model, device=devices.device, template_file=template_file, include_cond=True)
+
+    if unload:
+        shared.sd_model.cond_stage_model.to(devices.cpu)
+        shared.sd_model.first_stage_model.to(devices.cpu)
 
     hypernetwork = shared.loaded_hypernetwork
     weights = hypernetwork.weights()
     for weight in weights:
         weight.requires_grad = True
-
-    optimizer = torch.optim.AdamW(weights, lr=learn_rate)
 
     losses = torch.zeros((32,))
 
@@ -210,22 +223,26 @@ def train_hypernetwork(hypernetwork_name, learn_rate, data_root, log_directory, 
     if ititial_step > steps:
         return hypernetwork, filename
 
+    scheduler = LearnRateScheduler(learn_rate, steps, ititial_step)
+    optimizer = torch.optim.AdamW(weights, lr=scheduler.learn_rate)
+
     pbar = tqdm.tqdm(enumerate(ds), total=steps - ititial_step)
-    for i, (x, text) in pbar:
+    for i, entry in pbar:
         hypernetwork.step = i + ititial_step
 
-        if hypernetwork.step > steps:
+        scheduler.apply(optimizer, hypernetwork.step)
+        if scheduler.finished:
             break
 
         if shared.state.interrupted:
             break
 
         with torch.autocast("cuda"):
-            c = cond_model([text])
-
-            x = x.to(devices.device)
-            loss = shared.sd_model(x.unsqueeze(0), c)[0]
+            cond = entry.cond.to(devices.device)
+            x = entry.latent.to(devices.device)
+            loss = shared.sd_model(x.unsqueeze(0), cond)[0]
             del x
+            del cond
 
             losses[hypernetwork.step % losses.shape[0]] = loss.item()
 
@@ -242,7 +259,11 @@ def train_hypernetwork(hypernetwork_name, learn_rate, data_root, log_directory, 
         if hypernetwork.step > 0 and images_dir is not None and hypernetwork.step % create_image_every == 0:
             last_saved_image = os.path.join(images_dir, f'{hypernetwork_name}-{hypernetwork.step}.png')
 
-            preview_text = text if preview_image_prompt == "" else preview_image_prompt
+            preview_text = entry.cond_text if preview_image_prompt == "" else preview_image_prompt
+
+            optimizer.zero_grad()
+            shared.sd_model.cond_stage_model.to(devices.device)
+            shared.sd_model.first_stage_model.to(devices.device)
 
             p = processing.StableDiffusionProcessingTxt2Img(
                 sd_model=shared.sd_model,
@@ -253,12 +274,16 @@ def train_hypernetwork(hypernetwork_name, learn_rate, data_root, log_directory, 
             )
 
             processed = processing.process_images(p)
-            image = processed.images[0]
+            image = processed.images[0] if len(processed.images)>0 else None
 
-            shared.state.current_image = image
-            image.save(last_saved_image)
+            if unload:
+                shared.sd_model.cond_stage_model.to(devices.cpu)
+                shared.sd_model.first_stage_model.to(devices.cpu)
 
-            last_saved_image += f", prompt: {preview_text}"
+            if image is not None:
+                shared.state.current_image = image
+                image.save(last_saved_image)
+                last_saved_image += f", prompt: {preview_text}"
 
         shared.state.job_no = hypernetwork.step
 
@@ -266,7 +291,7 @@ def train_hypernetwork(hypernetwork_name, learn_rate, data_root, log_directory, 
 <p>
 Loss: {losses.mean():.7f}<br/>
 Step: {hypernetwork.step}<br/>
-Last prompt: {html.escape(text)}<br/>
+Last prompt: {html.escape(entry.cond_text)}<br/>
 Last saved embedding: {html.escape(last_saved_file)}<br/>
 Last saved image: {html.escape(last_saved_image)}<br/>
 </p>
