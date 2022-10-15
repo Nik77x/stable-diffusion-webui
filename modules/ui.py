@@ -561,6 +561,45 @@ def apply_setting(key, value):
     opts.save(shared.config_filename)
     return value
 
+def create_calculator_ui():
+    with gr.Accordion(label="aspect ratio calculator", open=False):
+
+        with gr.Row():
+            with gr.Column():
+                with gr.Group():
+                    with gr.Row():
+                        ratio_width = gr.Number(label="ratio width", value=1)
+                        ratio_height = gr.Number(label="ratio height", value=1)
+
+                    resolution = gr.Slider(label="Resolution", minimum=64, maximum=2048, step=64, value=512)
+
+            with gr.Column():
+                vertical_layout = gr.Checkbox(label="Vertical layout", value=False)
+                res_as_height = gr.Checkbox(label="use resolution as height")
+                apply_btn = gr.Button(label="Apply resolution")
+
+    return ratio_width, ratio_height, resolution, vertical_layout, res_as_height, apply_btn
+
+
+def calculate_resolution(res, w_ratio, h_ratio, vLayout, res_as_h):
+
+    if res_as_h:
+        tmp_height = res
+        tmp_width = res * (w_ratio / h_ratio)
+    else:
+        tmp_width = res
+        tmp_height = res * (h_ratio / w_ratio)
+
+     # set as nearest number divisible by 64 so SD doesn't implode
+    tmp_width = 64 * round(tmp_width / 64)
+    tmp_height = 64 * round(tmp_height / 64)
+
+    # return inverted for vertical layout
+    if vLayout:
+        return tmp_height, tmp_width
+
+    return tmp_width, tmp_height
+
 
 def create_ui(wrap_gradio_gpu_call):
     import modules.img2img
@@ -588,6 +627,12 @@ def create_ui(wrap_gradio_gpu_call):
                 with gr.Group():
                     width = gr.Slider(minimum=64, maximum=2048, step=64, label="Width", value=512)
                     height = gr.Slider(minimum=64, maximum=2048, step=64, label="Height", value=512)
+
+                    ratio_width, ratio_height, resolution, vertical_layout, res_as_height, apply_btn = create_calculator_ui()
+
+                    apply_btn.click(calculate_resolution,
+                                    inputs=[resolution, ratio_width, ratio_height, vertical_layout, res_as_height],
+                                    outputs=[width, height])
 
                 with gr.Row():
                     restore_faces = gr.Checkbox(label='Restore faces', value=False, visible=len(shared.face_restorers) > 1)
@@ -807,6 +852,12 @@ def create_ui(wrap_gradio_gpu_call):
                 with gr.Group():
                     width = gr.Slider(minimum=64, maximum=2048, step=64, label="Width", value=512)
                     height = gr.Slider(minimum=64, maximum=2048, step=64, label="Height", value=512)
+
+                    ratio_width, ratio_height, resolution, vertical_layout, res_as_height, apply_btn = create_calculator_ui()
+
+                    apply_btn.click(calculate_resolution,
+                                    inputs=[resolution, ratio_width, ratio_height, vertical_layout, res_as_height],
+                                    outputs=[width, height])
 
                 with gr.Row():
                     restore_faces = gr.Checkbox(label='Restore faces', value=False, visible=len(shared.face_restorers) > 1)
