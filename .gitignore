@@ -24,6 +24,7 @@ __pycache__
 /interrogate
 /user.css
 /.idea
+/.vscode
 notification.mp3
 /SwinIR
 /textual_inversion
