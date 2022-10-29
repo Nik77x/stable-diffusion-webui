@@ -29,3 +29,13 @@ notification.mp3
 /textual_inversion
 .vscode
 /extensions
+
+deforum_video-settings.txt
+
+deforum_settings.txt
+
+textual_inversion_templates/
+
+scripts/
+
+webui-user.bat
