@@ -152,14 +152,12 @@ class Api:
         )
         if populate.sampler_name:
             populate.sampler_index = None  # prevent a warning later on
-        p = StableDiffusionProcessingImg2Img(**vars(populate))
 
-        imgs = []
-        for img in init_images:
-            img = decode_base64_to_image(img)
-            imgs = [img] * p.batch_size
+        args = vars(populate)
+        args.pop('include_init_images', None)  # this is meant to be done by "exclude": True in model, but it's for a reason that I cannot determine.
+        p = StableDiffusionProcessingImg2Img(**args)
 
-        p.init_images = imgs
+        p.init_images = [decode_base64_to_image(x) for x in init_images]
 
         shared.state.begin()
 
@@ -170,7 +168,7 @@ class Api:
 
         b64images = list(map(encode_pil_to_base64, processed.images))
 
-        if (not img2imgreq.include_init_images):
+        if not img2imgreq.include_init_images:
             img2imgreq.init_images = None
             img2imgreq.mask = None
 
