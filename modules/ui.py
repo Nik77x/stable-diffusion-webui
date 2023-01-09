@@ -747,11 +747,12 @@ def create_ui():
                                 with gr.Column(elem_id="txt2img_column_batch"):
                                     batch_count = gr.Slider(minimum=1, step=1, label='Batch count', value=1, elem_id="txt2img_batch_count")
                                     batch_size = gr.Slider(minimum=1, maximum=8, step=1, label='Batch size', value=1, elem_id="txt2img_batch_size")
-                    ratio_width, ratio_height, resolution, vertical_layout, res_as_height, apply_btn = create_calculator_ui()
 
-                    apply_btn.click(calculate_resolution,
-                                    inputs=[resolution, ratio_width, ratio_height, vertical_layout, res_as_height],
-                                    outputs=[width, height])
+
+                        ratio_width, ratio_height, resolution, vertical_layout, res_as_height, apply_btn = create_calculator_ui()
+                        apply_btn.click(calculate_resolution,
+                                        inputs=[resolution, ratio_width, ratio_height, vertical_layout, res_as_height],
+                                        outputs=[width, height])
 
                     elif category == "cfg":
                         cfg_scale = gr.Slider(minimum=1.0, maximum=30.0, step=0.5, label='CFG Scale', value=7.0, elem_id="txt2img_cfg_scale")
@@ -991,11 +992,11 @@ def create_ui():
                                 with gr.Column(elem_id="img2img_column_batch"):
                                     batch_count = gr.Slider(minimum=1, step=1, label='Batch count', value=1, elem_id="img2img_batch_count")
                                     batch_size = gr.Slider(minimum=1, maximum=8, step=1, label='Batch size', value=1, elem_id="img2img_batch_size")
-                    ratio_width, ratio_height, resolution, vertical_layout, res_as_height, apply_btn = create_calculator_ui()
 
-                    apply_btn.click(calculate_resolution,
-                                    inputs=[resolution, ratio_width, ratio_height, vertical_layout, res_as_height],
-                                    outputs=[width, height])
+                        ratio_width, ratio_height, resolution, vertical_layout, res_as_height, apply_btn = create_calculator_ui()
+                        apply_btn.click(calculate_resolution,
+                                        inputs=[resolution, ratio_width, ratio_height, vertical_layout, res_as_height],
+                                        outputs=[width, height])
 
 
                     elif category == "cfg":
