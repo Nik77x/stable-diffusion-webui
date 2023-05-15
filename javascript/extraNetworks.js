@@ -1,4 +1,3 @@
-
 function setupExtraNetworksForTab(tabname){
     gradioApp().querySelector('#'+tabname+'_extra_tabs').classList.add('extra-networks')
 
@@ -10,16 +9,34 @@ function setupExtraNetworksForTab(tabname){
     tabs.appendChild(search)
     tabs.appendChild(refresh)
 
-    search.addEventListener("input", function(evt){
-        searchTerm = search.value.toLowerCase()
+    var applyFilter = function(){
+        var searchTerm = search.value.toLowerCase()
 
         gradioApp().querySelectorAll('#'+tabname+'_extra_tabs div.card').forEach(function(elem){
-            text = elem.querySelector('.name').textContent.toLowerCase() + " " + elem.querySelector('.search_term').textContent.toLowerCase()
-            elem.style.display = text.indexOf(searchTerm) == -1 ? "none" : ""
+            var searchOnly = elem.querySelector('.search_only')
+            var text = elem.querySelector('.name').textContent.toLowerCase() + " " + elem.querySelector('.search_term').textContent.toLowerCase()
+
+            var visible = text.indexOf(searchTerm) != -1
+
+            if(searchOnly && searchTerm.length < 4){
+                visible = false
+            }
+
+            elem.style.display = visible ? "" : "none"
         })
-    });
+    }
+
+    search.addEventListener("input", applyFilter);
+    applyFilter();
+
+    extraNetworksApplyFilter[tabname] = applyFilter;
 }
 
+function applyExtraNetworkFilter(tabname){
+    setTimeout(extraNetworksApplyFilter[tabname], 1);
+}
+
+var extraNetworksApplyFilter = {}
 var activePromptTextarea = {};
 
 function setupExtraNetworks(){
@@ -55,7 +72,7 @@ function tryToRemoveExtraNetworkFromPrompt(textarea, text){
 
     var partToSearch = m[1]
     var replaced = false
-    var newTextareaText = textarea.value.replaceAll(re_extranet_g, function(found, index){
+    var newTextareaText = textarea.value.replaceAll(re_extranet_g, function(found){
         m = found.match(re_extranet);
         if(m[1] == partToSearch){
             replaced = true;
@@ -96,9 +113,9 @@ function saveCardPreview(event, tabname, filename){
 }
 
 function extraNetworksSearchButton(tabs_id, event){
-    searchTextarea = gradioApp().querySelector("#" + tabs_id + ' > div > textarea')
-    button = event.target
-    text = button.classList.contains("search-all") ? "" : button.textContent.trim()
+    var searchTextarea = gradioApp().querySelector("#" + tabs_id + ' > div > textarea')
+    var button = event.target
+    var text = button.classList.contains("search-all") ? "" : button.textContent.trim()
 
     searchTextarea.value = text
     updateInput(searchTextarea)
@@ -133,9 +150,47 @@ function popup(contents){
 }
 
 function extraNetworksShowMetadata(text){
-    elem = document.createElement('pre')
+    var elem = document.createElement('pre')
     elem.classList.add('popup-metadata');
     elem.textContent = text;
 
     popup(elem);
+}
+
+function requestGet(url, data, handler, errorHandler){
+    var xhr = new XMLHttpRequest();
+    var args = Object.keys(data).map(function(k){ return encodeURIComponent(k) + '=' + encodeURIComponent(data[k]) }).join('&')
+    xhr.open("GET", url + "?" + args, true);
+
+    xhr.onreadystatechange = function () {
+        if (xhr.readyState === 4) {
+            if (xhr.status === 200) {
+                try {
+                    var js = JSON.parse(xhr.responseText);
+                    handler(js)
+                } catch (error) {
+                    console.error(error);
+                    errorHandler()
+                }
+            } else{
+                errorHandler()
+            }
+        }
+    };
+    var js = JSON.stringify(data);
+    xhr.send(js);
+}
+
+function extraNetworksRequestMetadata(event, extraPage, cardName){
+    var showError = function(){ extraNetworksShowMetadata("there was an error getting metadata"); }
+
+    requestGet("./sd_extra_networks/metadata", {"page": extraPage, "item": cardName}, function(data){
+        if(data && data.metadata){
+            extraNetworksShowMetadata(data.metadata)
+        } else{
+            showError()
+        }
+    }, showError)
+
+    event.stopPropagation()
 }
